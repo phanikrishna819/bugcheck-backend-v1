@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: bugcheck-agent-api
+    runtime: docker
+    region: oregon
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: LLM_PROVIDER
+        value: auto
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      # The agent runs arbitrary-ish build/test commands; keep that off in prod.
+      - key: AGENT_ALLOW_SHELL
+        value: "false"
+      - key: CORS_ALLOW_ORIGINS
+        value: "*"
+      - key: DATABASE_PATH
+        value: /tmp/bugcheck.db
+      - key: WORKSPACE_DIR
+        value: /tmp/workspaces
+      - key: UPLOAD_TMP_DIR
+        value: /tmp/uploads
+      - key: REPORTS_DIR
+        value: /tmp/reports
+      - key: SESSION_TTL_MINUTES
+        value: "720"

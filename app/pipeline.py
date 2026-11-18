@@ -33,6 +33,7 @@ from app.classifiers.static_scan import scan_asset_paths, scan_file_static
 from app.config import settings
 from app.environment.detect import detect_environment
 from app.llm.analyzer import analyze_file
+from app.llm.scan_client import llm_available
 from app.report.renderer import write_report_files
 from app.report.schema import DetectedEnvironment, Finding, Report
 from app.report.severity import assign_rule_ids, compute_counts, compute_verdict
@@ -109,14 +110,14 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
             findings += scan_html_structural(rel_path, text)
         per_file_static[rel_path] = findings
 
-    if not settings.gemini_api_key:
-        notes.append("GEMINI_API_KEY not set — ran static/deterministic checks only, no AI-assisted review.")
+    if not llm_available():
+        notes.append("No LLM API key configured — ran static/deterministic checks only, no AI-assisted review.")
 
     # --- select files for the LLM pass ---
     selection_input = [
         (rel, per_file_text[rel], len(per_file_static[rel])) for rel in per_file_text
     ]
-    selected = _select_files_for_llm(selection_input, settings.max_files_for_llm) if settings.gemini_api_key else set()
+    selected = _select_files_for_llm(selection_input, settings.max_files_for_llm) if llm_available() else set()
 
     all_findings: list[Finding] = []
     files_llm_reviewed = 0
@@ -132,7 +133,7 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
         else:
             all_findings.extend(static_findings)
 
-    if settings.gemini_api_key and len(per_file_text) > settings.max_files_for_llm:
+    if llm_available() and len(per_file_text) > settings.max_files_for_llm:
         notes.append(
             f"AI-assisted review ran on {files_llm_reviewed} of {len(per_file_text)} files "
             f"(capped by MAX_FILES_FOR_LLM={settings.max_files_for_llm} to respect free-tier rate limits); "

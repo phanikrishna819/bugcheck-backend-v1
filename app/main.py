@@ -1,75 +1,98 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+"""
+Bugcheck backend (FastAPI).
+
+Two feature sets share one process:
+
+  * /api/chat/*  - the chat/tool agent (OpenAI-compatible providers, workspace
+                   tools, SQLite-backed sessions) consumed by the existing
+                   React UI in bugcheck-agent-chatbot/frontend.
+  * /api/analyze - the original zip-upload static + AI scan pipeline.
+"""
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 
 from app import db
-from app.pipeline import run_pipeline
-from app.uploads.handler import extract_upload, cleanup_run
+from app.agent.llm import LLMError
+from app.api import chat, health, scan, skills, workspaces
+from app.config import settings
+
+logger = logging.getLogger("bugcheck")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    db.init_db()
+    settings.upload_tmp_path
+    settings.reports_path
+    settings.workspace_path
+    purged = db.purge_expired_sessions(settings.session_ttl_minutes)
+    if purged:
+        logger.info("Purged %s expired chat session(s).", purged)
+    yield
+
 
 app = FastAPI(
-    title="Frontend Bug Check API",
-    description="Uploads an Angular/React app, runs static + AI-assisted analysis, "
-                "returns a bug report with suggested fixes.",
-    version="0.1.0",
+    title="Bugcheck Agent API",
+    description="Chat-based bugcheck agent (OpenAI/Gemini, workspace tools) plus the "
+                "upload-and-scan frontend analyzer.",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
-# Wide open for now since there's no UI origin yet; tighten this once the
-# interactive UI has a known origin.
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
 )
 
 
-@app.on_event("startup")
-def _startup():
-    db.init_db()
+@app.exception_handler(ValueError)
+def handle_value_error(_request: Request, exc: ValueError):
+    return JSONResponse(status_code=400, content={"error": str(exc)})
 
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
+@app.exception_handler(KeyError)
+def handle_key_error(_request: Request, exc: KeyError):
+    return JSONResponse(status_code=404, content={"error": str(exc).strip("'")})
 
 
-@app.post("/api/analyze")
-async def analyze(file: UploadFile = File(...)):
-    """Upload a .zip of an Angular or React app. Runs the full pipeline
-    synchronously and returns the report. For large apps this can take a
-    while (LLM calls are rate-limited) — once a UI exists, this should
-    become a background job with a polling/streaming status endpoint
-    instead of a blocking request; see README "Making this async"."""
-    workspace_root, run_id = extract_upload(file)
-    try:
-        report, md_path, html_path = run_pipeline(workspace_root, run_id)
-        db.save_run(report, str(md_path), str(html_path))
-        return report
-    finally:
-        cleanup_run(run_id)
+@app.exception_handler(LLMError)
+def handle_llm_error(_request: Request, exc: LLMError):
+    logger.warning("LLM failure: %s", exc)
+    return JSONResponse(status_code=502, content={"error": str(exc)})
 
 
-@app.get("/api/runs")
-def get_runs(limit: int = 50):
-    return db.list_runs(limit)
+@app.exception_handler(RequestValidationError)
+def handle_validation_error(_request: Request, _exc: RequestValidationError):
+    return JSONResponse(status_code=400, content={"error": "Request validation failed."})
 
 
-@app.get("/api/runs/{run_id}")
-def get_run(run_id: str):
-    run = db.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found.")
-    return run
+@app.exception_handler(Exception)
+def handle_unexpected(_request: Request, exc: Exception):
+    logger.exception("Unhandled API error", exc_info=exc)
+    return JSONResponse(status_code=500, content={"error": "Internal server error."})
 
 
-@app.get("/api/runs/{run_id}/report.md")
-def get_run_markdown(run_id: str):
-    run = db.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found.")
-    return FileResponse(run["md_path"], media_type="text/markdown")
+app.include_router(health.router)
+app.include_router(skills.router)
+app.include_router(workspaces.router)
+app.include_router(chat.router)
+app.include_router(scan.router)
 
 
-@app.get("/api/runs/{run_id}/report.html", response_class=HTMLResponse)
-def get_run_html(run_id: str):
-    run = db.get_run(run_id)
-    if not run:
-        raise HTTPException(404, "Run not found.")
-    return FileResponse(run["html_path"], media_type="text/html")
+@app.get("/")
+def index():
+    return {
+        "service": "bugcheck-agent-api",
+        "docs": "/docs",
+        "health": "/api/health",
+        "chat": "/api/chat/sessions",
+        "scan": "/api/analyze",
+    }

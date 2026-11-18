@@ -7,3 +7,5 @@ tmp_uploads/*
 !tmp_uploads/.gitkeep
 reports/*
 !reports/.gitkeep
+tmp_workspaces/
+.pytest_cache/

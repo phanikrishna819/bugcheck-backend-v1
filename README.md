@@ -178,3 +178,126 @@ app/
   original taxonomy didn't have many CSS-specific classifiers to begin
   with, so this mirrors that rather than under-implementing something that
   was there.
+
+---
+
+# Chat agent API (Python port of the Java backend)
+
+The service now also implements the **chat/tool agent** that the deployed
+React UI (`bugcheck-agent-chatbot/frontend`) already speaks. The UI contract
+is unchanged, so no frontend code changes are required — only its `/api`
+proxy target has to point here.
+
+## Architecture
+
+```
+Browser -> React (nginx) -> /api/* -> FastAPI (this repo) -> LLM provider
+                                          |-> workspace tools (files/git/shell/patch)
+                                          |-> SQLite (sessions, messages, workspaces, runs)
+                                          |-> zip scan pipeline (existing)
+```
+
+Request flow for a chat turn:
+
+1. `POST /api/chat/sessions/{id}/messages` stores the user turn.
+2. `app/agent/service.py` builds the prompt: `bugcheck.agent.md` + every
+   `skills/*.md` (from `app/assets`, or `AGENT_ASSETS_DIR`) + session state +
+   the stored transcript.
+3. The model answers, or requests tools. Tool calls run in
+   `app/tools/registry.py`, their output is appended as `role=tool`, and the
+   model is called again — up to `AGENT_MAX_TOOL_ROUNDS` (default 8).
+4. The whole transcript is persisted, so follow-up messages keep the code
+   context instead of losing it between turns.
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Liveness + which LLM providers/models are active |
+| GET | `/api/skills` | `{assetsRoot, skills[]}` for the UI sidebar |
+| POST | `/api/workspaces` | `{path}` -> bind local dir or clone git URL |
+| POST | `/api/chat/sessions` | `{workspaceRoot?, allowEdits}` -> session |
+| GET | `/api/chat/sessions` | list sessions |
+| GET | `/api/chat/sessions/{id}` | one session |
+| DELETE | `/api/chat/sessions/{id}` | delete session |
+| POST | `/api/chat/sessions/{id}/messages` | send a turn, returns the session |
+| POST | `/api/analyze` | zip upload scan (existing pipeline) |
+| GET | `/api/runs`, `/api/runs/{id}`, `.../report.md`, `.../report.html` | scan history |
+
+## Provider routing
+
+`LLM_PROVIDER=auto` (default) picks per purpose and falls back to the other
+provider when both keys exist:
+
+| Purpose | First choice | Fallback |
+| --- | --- | --- |
+| `chat` (tool loop) | OpenAI (`gpt-4.1-mini`) | Gemini via its OpenAI-compatible endpoint |
+| `scan` (per-file JSON) | Gemini (free tier + RPM throttle) | OpenAI JSON mode |
+
+Override with `LLM_PROVIDER`, `LLM_CHAT_PROVIDER`, `LLM_SCAN_PROVIDER`,
+`LLM_CHAT_MODEL`, `LLM_SCAN_MODEL`. No key set -> static-only scan and a
+clean `502` on chat.
+
+## Workspaces
+
+- **Local path** (`C:\...`, `/home/...`) — works when the backend runs on the
+  same machine; identical to the Java behavior.
+- **Git URL** (`https://github.com/org/repo[.git]`, `git@...`) — shallow
+  cloned into `WORKSPACE_DIR` and analyzed there, which is what makes the
+  cloud deployment useful.
+
+Set `WORKSPACE_MODE=local|clone|both`.
+
+## Safety model
+
+- Every path goes through `resolve_inside`, which rejects anything outside the
+  workspace root (symlinks are resolved).
+- `apply_patch`/`write_report` require `allowEdits`; `.git` is off limits.
+- `apply_patch` refuses ambiguous matches (the Java version replaced *every*
+  occurrence) and writes a `.bak` before editing.
+- `run_command` uses an **allowlist** (`AGENT_ALLOWED_COMMANDS`) plus a
+  denylist for git-writing/destructive commands; set `AGENT_ALLOW_SHELL=false`
+  in production to remove it entirely.
+- Child processes are drained by a reader thread and killed at the timeout, so
+  large `git diff` output no longer deadlocks.
+- Sessions expire after `SESSION_TTL_MINUTES` (default 12h).
+
+## Run locally
+
+```powershell
+cd C:\Users\phani\OneDrive\Desktop\MTech\Agent\bugcheck-backend\bugcheck-backend
+.\\venv\\Scripts\\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env    # then fill OPENAI_API_KEY and/or GEMINI_API_KEY
+.\\venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8088
+```
+
+Point the UI at it in dev with `VITE_API_BASE_URL=http://localhost:8088` (or
+keep the Vite proxy).
+
+## Deploy (Render)
+
+`render.yaml` + `Dockerfile` are included (service `bugcheck-agent-api`,
+health check `/api/health`, `AGENT_ALLOW_SHELL=false`). Then repoint the
+frontend's nginx proxy:
+
+```nginx
+location /api/ {
+    proxy_pass https://bugcheck-agent-api.onrender.com;
+    # ...
+}
+```
+
+and redeploy the frontend (or build it with
+`VITE_API_BASE_URL=https://bugcheck-agent-api.onrender.com`). Render's free
+plan has an ephemeral disk: sessions, clones, and reports reset on redeploy /
+15-minute idle spin-down unless a persistent disk is attached.
+
+## Tests
+
+```powershell
+.\\venv\\Scripts\\python.exe -m pytest tests -q
+```
+
+Covers the UI contract, session persistence, workspace escape rejection,
+ambiguous-patch handling, the command allowlist, and the read tools.
+

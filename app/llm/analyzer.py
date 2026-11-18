@@ -19,7 +19,7 @@ apply-and-verify mode once the backend owns a real checkout.
 import json
 
 from app.classifiers.rules import llm_rules_for, rule_by_id
-from app.llm.gemini_client import gemini_client
+from app.llm.scan_client import generate_json
 from app.report.schema import Finding
 
 MAX_CHARS_PER_FILE = 12000
@@ -87,7 +87,7 @@ def analyze_file(file_rel: str, text: str, framework: str, file_ext: str,
         return static_findings, []
 
     prompt = _build_user_prompt(file_rel, text, framework, llm_rules, static_findings)
-    parsed = gemini_client.generate_json(SYSTEM_PROMPT, prompt)
+    parsed = generate_json(SYSTEM_PROMPT, prompt)
 
     if not isinstance(parsed, dict):
         return static_findings, []

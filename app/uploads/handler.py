@@ -44,7 +44,17 @@ def extract_upload(upload: UploadFile) -> tuple[Path, str]:
 
     try:
         with zipfile.ZipFile(zip_path) as zf:
-            for member in zf.infolist():
+            members = zf.infolist()
+            if len(members) > settings.max_extracted_files:
+                raise HTTPException(
+                    413, f"Archive has too many entries ({len(members)} > {settings.max_extracted_files})."
+                )
+            declared = sum(member.file_size for member in members)
+            if declared > settings.max_extracted_mb * 1024 * 1024:
+                raise HTTPException(
+                    413, f"Extracted size exceeds {settings.max_extracted_mb} MB limit."
+                )
+            for member in members:
                 dest = extract_dir / member.filename
                 if not _is_within_directory(extract_dir, dest):
                     raise HTTPException(400, f"Unsafe path in zip archive: {member.filename}")
@@ -52,6 +62,9 @@ def extract_upload(upload: UploadFile) -> tuple[Path, str]:
     except zipfile.BadZipFile:
         shutil.rmtree(run_dir, ignore_errors=True)
         raise HTTPException(400, "That doesn't look like a valid zip file.")
+    except HTTPException:
+        shutil.rmtree(run_dir, ignore_errors=True)
+        raise
 
     zip_path.unlink(missing_ok=True)
 
