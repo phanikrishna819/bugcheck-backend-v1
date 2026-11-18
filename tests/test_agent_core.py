@@ -68,6 +68,64 @@ def test_missing_provider_is_a_clean_502(client):
 
 # --- workspace safety -------------------------------------------------------
 
+def test_tool_files_are_hidden_from_ui(client):
+    from app import db
+
+    session = client.post("/api/chat/sessions", json={"allowEdits": False}).json()
+    db.add_message(session["id"], "user", "scan this repo")
+    db.add_message(session["id"], "tool", "list_files: OK\nsrc/App.jsx\nsrc/main.jsx",
+                   tool_name="list_files", tool_call_id="call_1")
+    db.add_message(session["id"], "assistant", "Found 1 bug in src/App.jsx.")
+    roles = [m["role"] for m in client.get(f"/api/chat/sessions/{session['id']}").json()["messages"]]
+    assert roles == ["user", "assistant"]
+
+
+def test_pdf_fix_report_renders():
+    from app.report.pdf import render_fixes_pdf
+    from app.report.schema import DetectedEnvironment, Finding, Report
+
+    report = Report(
+        run_id="abcd1234", created_at="2026-11-19 00:00:00 UTC", verdict="HIGH_RISK",
+        detected_environment=DetectedEnvironment(
+            app_name="demo", framework="react", framework_family="react",
+            pkg_mgr="npm", test_runner="jest",
+        ),
+        total_files_scanned=3, total_files_llm_reviewed=2,
+        counts={"HIGH": 1, "MEDIUM": 0, "LOW": 0},
+        findings=[Finding(
+            rule_id="QA-H01", classifier="image-missing-alt", title="Image missing alt text",
+            severity="HIGH", file="src/App.jsx", line_start=4, line_end=4,
+            evidence='<img src="/logo.png" />', why_it_matters="Screen readers skip the image.",
+            suggested_fix="Add descriptive alt text.", source="llm", confidence="high",
+        )],
+        notes=["AI review capped at 12 files"],
+    )
+    pdf = render_fixes_pdf(report)
+    assert pdf.startswith(b"%PDF")
+    assert len(pdf) > 1000
+
+
+def test_pdf_report_endpoint(client, tmp_path):
+    root = tmp_path / "demo-app"
+    (root / "src").mkdir(parents=True)
+    (root / "package.json").write_text(
+        '{"name":"demo","dependencies":{"react":"^18.2.0"},"devDependencies":{"vite":"^4.0.0"}}'
+    )
+    (root / "index.html").write_text('<!doctype html><html><body><div id="root"></div></body></html>')
+    (root / "src" / "App.jsx").write_text(
+        'export default function App(){ console.log("debug"); return <img src="a.png" />; }\n'
+    )
+    session = client.post(
+        "/api/chat/sessions", json={"workspaceRoot": str(root), "allowEdits": False}
+    ).json()
+    response = client.post(f"/api/chat/sessions/{session['id']}/report.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF")
+    assert len(response.content) > 1000
+
+
 def test_workspace_binding_and_escape(workspace):
     bound = bind(str(workspace))
     assert Path(bound) == workspace.resolve()

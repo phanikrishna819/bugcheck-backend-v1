@@ -37,10 +37,10 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="Bugcheck Agent API",
-    description="Chat-based bugcheck agent (OpenAI/Gemini, workspace tools) plus the "
-                "upload-and-scan frontend analyzer.",
-    version="0.2.0",
+    title="Buggy API",
+    description="Buggy (the Bugcheck Agent): chat-based code review with workspace tools, "
+                "on-demand PDF fix reports, plus the upload-and-scan frontend analyzer.",
+    version="0.3.0",
     lifespan=lifespan,
 )
 

@@ -1,8 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app import db
 from app.agent import service, sessions
+from app.config import settings
+from app.pipeline import analyze_workspace
+from app.report.pdf import render_fixes_pdf
 from app.workspace import resolver
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -65,3 +71,22 @@ def send_message(session_id: str, request: MessageCreateRequest):
 
     service.respond(session_id, request.content)
     return sessions.to_response(session_id)
+
+
+@router.post("/sessions/{session_id}/report.pdf")
+def session_report_pdf(session_id: str):
+    """Scan the session's registered workspace and return a fix PDF."""
+    session = sessions.get(session_id)
+    root = session.get("workspace_root")
+    if not root or not Path(root).is_dir():
+        raise ValueError("Register a workspace (git URL or local path) before generating a PDF report.")
+
+    report = analyze_workspace(
+        Path(root), uuid4().hex[:12], max_files_for_llm=settings.pdf_max_files_for_llm,
+    )
+    pdf = render_fixes_pdf(report)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="buggy-fixes-{session_id[:8]}.pdf"'},
+    )

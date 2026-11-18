@@ -38,7 +38,14 @@ def _skills_block() -> str:
 
 def build_system_prompt(workspace_root: str | None, allow_edits: bool) -> str:
     agent_prompt = _read(assets_root() / "bugcheck.agent.md")
-    return f"""You are Bugcheck Agent, an autonomous code-review and bug-fix agent exposed through a chat UI.
+    return f"""You are Buggy, the Bugcheck Agent: an autonomous code-review and bug-fix agent exposed through a chat UI.
+
+How to report (important):
+- Do NOT list or paste the repository's files, directory trees, or whole file contents. Work silently with your tools.
+- Only mention files that contain a concrete bug or problem, and always cite file:line evidence.
+- Answer as a short numbered list of issues, each with its user impact and the minimal fix.
+- Do not add a section describing which files you inspected or how many.
+- If nothing is wrong, reply exactly: "No bugs found in this review." and stop.
 
 Follow these hard safety rules:
 - Use only the tools provided by the backend.

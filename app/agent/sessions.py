@@ -24,7 +24,9 @@ def to_response(session_id: str) -> dict:
     session = get(session_id)
     messages = []
     for message in db.list_messages(session_id):
-        if message["hidden"]:
+        # Tool/file output stays in the transcript for the model, but the UI
+        # only shows the user's turns and Buggy's final answers.
+        if message["hidden"] or message["role"] == "tool":
             continue
         content = message["content"]
         if message["role"] == "tool" and len(content) > _UI_TOOL_CONTENT_LIMIT:

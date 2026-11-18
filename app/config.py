@@ -68,6 +68,9 @@ class Settings(BaseSettings):
 
     # --- sessions ---
     session_ttl_minutes: int = 720
+    # The on-demand PDF report is a synchronous request; keep the LLM pass
+    # small enough to finish inside the proxy timeout on the free tier.
+    pdf_max_files_for_llm: int = 12
 
     # --- existing scan pipeline ---
     max_files_for_llm: int = 40

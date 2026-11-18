@@ -62,7 +62,8 @@ def _select_files_for_llm(files: list[tuple[str, str, int]], cap: int) -> set[st
     return {f[0] for f in ordered[:cap]}
 
 
-def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]:
+def analyze_workspace(workspace_root: Path, run_id: str,
+                      max_files_for_llm: int | None = None) -> Report:
     env = detect_environment(workspace_root)
     created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     notes: list[str] = []
@@ -90,8 +91,7 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
             detected_environment=detected_env, total_files_scanned=0, total_files_llm_reviewed=0,
             counts=counts, findings=findings, notes=notes,
         )
-        md_path, html_path = write_report_files(report)
-        return report, md_path, html_path
+        return report
 
     scope = FullAppScope()
     scanned_files = scope.resolve(workspace_root)
@@ -117,7 +117,8 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
     selection_input = [
         (rel, per_file_text[rel], len(per_file_static[rel])) for rel in per_file_text
     ]
-    selected = _select_files_for_llm(selection_input, settings.max_files_for_llm) if llm_available() else set()
+    cap = max(0, max_files_for_llm if max_files_for_llm is not None else settings.max_files_for_llm)
+    selected = _select_files_for_llm(selection_input, cap) if (llm_available() and cap > 0) else set()
 
     all_findings: list[Finding] = []
     files_llm_reviewed = 0
@@ -133,10 +134,10 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
         else:
             all_findings.extend(static_findings)
 
-    if llm_available() and len(per_file_text) > settings.max_files_for_llm:
+    if llm_available() and len(per_file_text) > cap:
         notes.append(
             f"AI-assisted review ran on {files_llm_reviewed} of {len(per_file_text)} files "
-            f"(capped by MAX_FILES_FOR_LLM={settings.max_files_for_llm} to respect free-tier rate limits); "
+            f"(capped at {cap} to respect free-tier rate limits); "
             "files with static findings were prioritized. See README for raising this cap or adding "
             "diff-scoped (changed-files-only) mode."
         )
@@ -148,5 +149,10 @@ def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]
         detected_environment=detected_env, total_files_scanned=len(scanned_files),
         total_files_llm_reviewed=files_llm_reviewed, counts=counts, findings=findings, notes=notes,
     )
+    return report
+
+
+def run_pipeline(workspace_root: Path, run_id: str) -> tuple[Report, Path, Path]:
+    report = analyze_workspace(workspace_root, run_id)
     md_path, html_path = write_report_files(report)
     return report, md_path, html_path
