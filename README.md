@@ -184,17 +184,19 @@ app/
 # Chat agent API (Python port of the Java backend)
 
 The service now also implements the **chat/tool agent** that the deployed
-React UI (`bugcheck-agent-chatbot/frontend`) already speaks. The UI contract
-is unchanged, so no frontend code changes are required — only its `/api`
-proxy target has to point here.
+React UI (`bugcheck-agent-chatbot/frontend`) speaks. The production build of
+that UI is committed under `app/static` and served by this same service, so
+UI and API share one origin (and one Render free-tier instance).
 
 ## Architecture
 
 ```
-Browser -> React (nginx) -> /api/* -> FastAPI (this repo) -> LLM provider
-                                          |-> workspace tools (files/git/shell/patch)
-                                          |-> SQLite (sessions, messages, workspaces, runs)
-                                          |-> zip scan pipeline (existing)
+Browser -> FastAPI (this repo)
+             |-> /            bundled React UI (app/static)
+             |-> /api/*        chat/tool agent + zip scan pipeline
+             |-> workspace tools (files/git/shell/patch)
+             |-> SQLite (sessions, messages, workspaces, runs)
+             |-> LLM provider (OpenAI or Gemini)
 ```
 
 Request flow for a chat turn:
@@ -221,6 +223,7 @@ Request flow for a chat turn:
 | GET | `/api/chat/sessions/{id}` | one session |
 | DELETE | `/api/chat/sessions/{id}` | delete session |
 | POST | `/api/chat/sessions/{id}/messages` | send a turn, returns the session |
+| POST | `/api/chat/sessions/{id}/report.pdf` | scan the session workspace, download the fix PDF |
 | POST | `/api/analyze` | zip upload scan (existing pipeline) |
 | GET | `/api/runs`, `/api/runs/{id}`, `.../report.md`, `.../report.html` | scan history |
 
@@ -276,21 +279,16 @@ keep the Vite proxy).
 
 ## Deploy (Render)
 
-`render.yaml` + `Dockerfile` are included (service `bugcheck-agent-api`,
-health check `/api/health`, `AGENT_ALLOW_SHELL=false`). Then repoint the
-frontend's nginx proxy:
+`render.yaml` + `Dockerfile` are included: a single service
+(`bugcheck-agent-api`, health check `/api/health`, `AGENT_ALLOW_SHELL=false`)
+that serves both the UI and the API. No nginx/proxy service is needed, which
+also removes the 502s that happen when a separate proxy service wakes before
+the API.
 
-```nginx
-location /api/ {
-    proxy_pass https://bugcheck-agent-api.onrender.com;
-    # ...
-}
-```
-
-and redeploy the frontend (or build it with
-`VITE_API_BASE_URL=https://bugcheck-agent-api.onrender.com`). Render's free
-plan has an ephemeral disk: sessions, clones, and reports reset on redeploy /
-15-minute idle spin-down unless a persistent disk is attached.
+To refresh the bundled UI, rebuild it in the frontend repo and copy
+`frontend/dist/*` into `app/static/`, then redeploy. Render's free plan has an
+ephemeral disk: sessions, clones, and reports reset on redeploy / 15-minute
+idle spin-down unless a persistent disk is attached.
 
 ## Tests
 

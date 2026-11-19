@@ -126,6 +126,20 @@ def test_pdf_report_endpoint(client, tmp_path):
     assert len(response.content) > 1000
 
 
+def test_ui_served_from_api_origin(client):
+    import re
+
+    page = client.get("/")
+    assert page.status_code == 200
+    assert page.headers["content-type"].startswith("text/html")
+    assert "<title>Buggy</title>" in page.text
+
+    asset = re.search(r'/assets/[^"]+\.js', page.text)
+    assert asset is not None
+    assert client.get(asset.group(0)).status_code == 200
+    assert client.get("/api/definitely-not-real").status_code == 404
+
+
 def test_workspace_binding_and_escape(workspace):
     bound = bind(str(workspace))
     assert Path(bound) == workspace.resolve()

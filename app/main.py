@@ -10,11 +10,13 @@ Two feature sets share one process:
 """
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app.agent.llm import LLMError
@@ -22,6 +24,8 @@ from app.api import chat, health, scan, skills, workspaces
 from app.config import settings
 
 logger = logging.getLogger("bugcheck")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 @asynccontextmanager
@@ -86,13 +90,29 @@ app.include_router(workspaces.router)
 app.include_router(chat.router)
 app.include_router(scan.router)
 
+if (STATIC_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
-@app.get("/")
-def index():
-    return {
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_ui(full_path: str):
+    """Serve the bundled React UI from the API origin (single-service deploy)."""
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if full_path:
+        candidate = (STATIC_DIR / full_path).resolve()
+        if candidate.is_file() and candidate.is_relative_to(STATIC_DIR):
+            return FileResponse(candidate)
+
+    index = STATIC_DIR / "index.html"
+    if index.is_file():
+        return FileResponse(index)
+
+    return JSONResponse({
         "service": "bugcheck-agent-api",
         "docs": "/docs",
         "health": "/api/health",
         "chat": "/api/chat/sessions",
         "scan": "/api/analyze",
-    }
+    })
