@@ -19,7 +19,10 @@ from app.tools.common import ToolContext
 from app.tools.definitions import TOOL_DEFINITIONS
 from app.tools.registry import execute
 
-MAX_ROUND_MESSAGE = "The agent reached the maximum tool-call rounds. Ask it to continue if more work is needed."
+MAX_ROUND_MESSAGE = (
+    "I hit my tool-call limit for this turn before finishing. "
+    "Ask me to continue and I'll pick up where I left off."
+)
 
 
 def _build_messages(history: list[dict], workspace: str | None, allow_edits: bool) -> list[dict]:
@@ -100,8 +103,25 @@ def respond(session_id: str, user_message: str) -> str:
                 "content": result.output,
             })
 
-    db.add_message(session_id, "assistant", MAX_ROUND_MESSAGE)
-    return MAX_ROUND_MESSAGE
+    # Budget spent: ask for a final, tool-free summary instead of dropping a
+    # bare "max rounds" notice on the user.
+    nudge = (
+        "Tool budget exhausted. Do not call any more tools. Using only what you "
+        "have already learned, summarize the concrete bugs with file:line evidence "
+        "and minimal fixes."
+    )
+    text = ""
+    try:
+        final = router.complete(
+            "chat", [*messages, {"role": "user", "content": nudge}],
+            tools=None, temperature=settings.agent_temperature,
+        )
+        text = (final.content or "").strip()
+    except LLMError:
+        text = ""
+    text = text or MAX_ROUND_MESSAGE
+    db.add_message(session_id, "assistant", text)
+    return text
 
 
 __all__ = ["respond", "LLMError"]

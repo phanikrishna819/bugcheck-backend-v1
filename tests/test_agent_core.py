@@ -140,6 +140,44 @@ def test_ui_served_from_api_origin(client):
     assert client.get("/api/definitely-not-real").status_code == 404
 
 
+def test_tool_budget_exhaustion_falls_back_to_summary(client, tmp_path, monkeypatch):
+    from app.agent import service
+    from app.agent.llm import AssistantTurn, ToolCall
+
+    root = tmp_path / "budget-repo"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "a.js").write_text("console.log('debug');\n")
+    (root / "package.json").write_text(
+        '{"dependencies":{"react":"^18.0.0"},"devDependencies":{"vite":"^5.0.0"}}'
+    )
+    session = client.post(
+        "/api/chat/sessions", json={"workspaceRoot": str(root), "allowEdits": False}
+    ).json()
+
+    calls = {"n": 0}
+
+    def fake_complete(_purpose, _messages, tools=None, temperature=0.1):
+        calls["n"] += 1
+        if tools:
+            call = ToolCall(id=f"call_{calls['n']}", name="list_files", arguments="{}")
+            return AssistantTurn(
+                content="",
+                tool_calls=[call],
+                message={"role": "assistant", "content": "", "tool_calls": [
+                    {"id": call.id, "type": "function",
+                     "function": {"name": call.name, "arguments": call.arguments}}
+                ]},
+            )
+        return AssistantTurn(content="Findings: console.log at src/a.js:1.")
+
+    monkeypatch.setattr(service.router, "complete", fake_complete)
+    text = service.respond(session["id"], "scan this repo")
+
+    assert "console.log at src/a.js:1" in text
+    assert service.MAX_ROUND_MESSAGE not in text
+    assert calls["n"] > 1
+
+
 def test_workspace_binding_and_escape(workspace):
     bound = bind(str(workspace))
     assert Path(bound) == workspace.resolve()

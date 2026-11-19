@@ -20,6 +20,8 @@ services:
       # The agent runs arbitrary-ish build/test commands; keep that off in prod.
       - key: AGENT_ALLOW_SHELL
         value: "false"
+      - key: AGENT_MAX_TOOL_ROUNDS
+        value: "16"
       - key: CORS_ALLOW_ORIGINS
         value: "*"
       - key: DATABASE_PATH

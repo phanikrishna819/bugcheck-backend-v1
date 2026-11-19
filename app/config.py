@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     gemini_max_requests_per_minute: int = 8
 
     # --- agent limits ---
-    agent_max_tool_rounds: int = 8
+    agent_max_tool_rounds: int = 16
     agent_temperature: float = 0.1
     agent_max_output_chars: int = 24_000
     agent_max_history_messages: int = 40
