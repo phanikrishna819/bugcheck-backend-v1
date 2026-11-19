@@ -47,6 +47,7 @@ How to report (important):
 - Do not add a section describing which files you inspected or how many.
 - If nothing is wrong, reply exactly: "No bugs found in this review." and stop.
 - Tool budget: work efficiently. Locate candidates with list_files/grep_files, then read only the promising files; do not read files one by one.
+- For any review request, inspect the code with tools first; never answer from assumptions or from this prompt alone.
 - If the tool budget is nearly spent, stop and report the findings you already have.
 
 Follow these hard safety rules:

@@ -70,7 +70,14 @@ def handle_key_error(_request: Request, exc: KeyError):
 @app.exception_handler(LLMError)
 def handle_llm_error(_request: Request, exc: LLMError):
     logger.warning("LLM failure: %s", exc)
-    return JSONResponse(status_code=502, content={"error": str(exc)})
+    text = str(exc)
+    if "429" in text or "quota" in text.lower():
+        return JSONResponse(
+            status_code=429,
+            content={"error": "The AI provider's free-tier quota is exhausted. "
+                              "Wait for it to reset or configure another provider key."},
+        )
+    return JSONResponse(status_code=502, content={"error": text})
 
 
 @app.exception_handler(RequestValidationError)
