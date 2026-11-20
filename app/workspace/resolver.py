@@ -126,3 +126,17 @@ def relativize(root: Path, path: Path) -> str:
 
 def is_registered(path: str) -> bool:
     return db.is_registered_workspace(str(Path(path).expanduser().resolve()))
+
+
+def release(path: str | Path) -> None:
+    """Delete a temporary clone, never a user's local workspace directory."""
+    try:
+        candidate = Path(path).expanduser().resolve()
+        workspace = settings.workspace_path.resolve()
+    except OSError:
+        return
+    if candidate == workspace or workspace not in candidate.parents:
+        return
+    clone_root = candidate.parent if candidate.name == "repo" else candidate
+    if clone_root.parent == workspace:
+        shutil.rmtree(clone_root, ignore_errors=True)

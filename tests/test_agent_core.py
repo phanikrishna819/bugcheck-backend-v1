@@ -124,6 +124,30 @@ def test_pdf_report_endpoint(client, tmp_path):
     assert "attachment" in response.headers["content-disposition"]
     assert response.content.startswith(b"%PDF")
     assert len(response.content) > 1000
+    # The session is erased after the report, but a user's local dir is kept.
+    assert client.get(f"/api/chat/sessions/{session['id']}").status_code == 404
+    assert (root / "package.json").is_file()
+
+
+def test_pdf_report_deletes_temporary_clone(client):
+    from app.config import settings
+
+    clone = settings.workspace_path / "abc123def456" / "repo"
+    clone.mkdir(parents=True)
+    (clone / "package.json").write_text(
+        '{"dependencies":{"react":"^18.0.0"},"devDependencies":{"vite":"^5.0.0"}}'
+    )
+    (clone / "index.html").write_text("<!doctype html><html><body></body></html>")
+
+    session = client.post(
+        "/api/chat/sessions", json={"workspaceRoot": str(clone), "allowEdits": False}
+    ).json()
+    response = client.post(f"/api/chat/sessions/{session['id']}/report.pdf")
+
+    assert response.status_code == 200
+    assert not clone.exists()
+    assert not (settings.workspace_path / "abc123def456").exists()
+    assert client.get(f"/api/chat/sessions/{session['id']}").status_code == 404
 
 
 def test_ui_served_from_api_origin(client):

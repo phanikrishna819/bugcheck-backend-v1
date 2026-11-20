@@ -75,18 +75,31 @@ def send_message(session_id: str, request: MessageCreateRequest):
 
 @router.post("/sessions/{session_id}/report.pdf")
 def session_report_pdf(session_id: str):
-    """Scan the session's registered workspace and return a fix PDF."""
+    """Scan the session's workspace, return a fix PDF, then erase the session."""
     session = sessions.get(session_id)
     root = session.get("workspace_root")
     if not root or not Path(root).is_dir():
         raise ValueError("Register a workspace (git URL or local path) before generating a PDF report.")
 
-    report = analyze_workspace(
-        Path(root), uuid4().hex[:12], max_files_for_llm=settings.pdf_max_files_for_llm,
-    )
-    pdf = render_fixes_pdf(report)
+    try:
+        report = analyze_workspace(
+            Path(root), uuid4().hex[:12], max_files_for_llm=settings.pdf_max_files_for_llm,
+        )
+        pdf = render_fixes_pdf(report)
+    finally:
+        _discard_session(session_id, root)
+
     return Response(
         content=pdf,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="buggy-fixes-{session_id[:8]}.pdf"'},
     )
+
+
+def _discard_session(session_id: str, workspace_root: str):
+    """Remove the transcript and the temporary clone once a report is built."""
+    db.delete_session(session_id)
+    if db.workspace_in_use(workspace_root):
+        return
+    db.unregister_workspace(workspace_root)
+    resolver.release(workspace_root)

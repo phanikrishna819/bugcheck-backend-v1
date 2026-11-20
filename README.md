@@ -223,7 +223,7 @@ Request flow for a chat turn:
 | GET | `/api/chat/sessions/{id}` | one session |
 | DELETE | `/api/chat/sessions/{id}` | delete session |
 | POST | `/api/chat/sessions/{id}/messages` | send a turn, returns the session |
-| POST | `/api/chat/sessions/{id}/report.pdf` | scan the session workspace, download the fix PDF |
+| POST | `/api/chat/sessions/{id}/report.pdf` | scan the session workspace, download the fix PDF, then erase the session + temporary clone |
 | POST | `/api/analyze` | zip upload scan (existing pipeline) |
 | GET | `/api/runs`, `/api/runs/{id}`, `.../report.md`, `.../report.html` | scan history |
 

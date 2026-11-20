@@ -248,6 +248,19 @@ def delete_session(session_id: str):
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 
+def workspace_in_use(path: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sessions WHERE workspace_root = ? LIMIT 1", (path,)
+        ).fetchone()
+        return row is not None
+
+
+def unregister_workspace(path: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM workspaces WHERE path = ?", (path,))
+
+
 def purge_expired_sessions(ttl_minutes: int) -> int:
     if ttl_minutes <= 0:
         return 0
